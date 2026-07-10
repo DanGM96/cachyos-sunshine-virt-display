@@ -1,69 +1,143 @@
 # Sunshine + KDE Wayland virtual display (CachyOS)
 
-Stream correct resolution/aspect ratio to any Moonlight client, no dummy HDMI plug,
-by creating a `krfb-virtualmonitor` display sized to the client and capturing it via
-Sunshine's `kwin` capture mode.
+Stream the correct resolution and aspect ratio to any Moonlight client — no
+dummy HDMI plug required.
 
-Source guide: see PDF in repo root (Reddit r/MoonlightStreaming, u/Koiut, with
-u/TacticalFreak improvements).
+Normally, streaming from a headless or docked machine means either plugging
+in a dummy HDMI adapter (a fixed resolution that likely won't match your
+client) or fighting with software-emulated displays. This project instead
+creates a `krfb-virtualmonitor` display sized exactly to match whatever
+client connects, and has Sunshine capture that virtual display via its
+`kwin` capture mode — so the stream always matches the client's native
+resolution and aspect ratio.
+
+## Contents
+
+- [Requirements](#requirements)
+- [Sunshine config file locations](#sunshine-config-file-locations)
+- [Setup](#setup)
+- [How it works](#how-it-works)
+- [Known issues / FAQ](#known-issues--faq)
+- [Debugging a failed start](#debugging-a-failed-start)
 
 ## Requirements
 
-- KDE Plasma on Wayland
-- Sunshine (latest stable)
-- `krfb` + `kscreen`: `sudo pacman -S krfb kscreen`
-- `jq`
+- **KDE Plasma on Wayland.** This project relies on two KDE-specific pieces
+  — KWin's screen-capture portal (used by Sunshine's `kwin` capture mode)
+  and `kscreen-doctor` (used to read and restore your monitor layout) — so
+  it won't work on X11 or on non-KDE desktops.
+- **Sunshine** (latest stable). Provides the streaming server and the
+  Application/prep-command hooks these scripts plug into.
+- **`krfb`, `kscreen`, and `jq`:**
+  ```
+  sudo pacman -S krfb kscreen jq
+  ```
+  - `krfb` provides `krfb-virtualmonitor`, the binary that actually
+    creates the virtual display.
+  - `kscreen` provides `kscreen-doctor`, used to enable/disable monitors
+    and to read/restore their layout.
+  - `jq` parses `kscreen-doctor --json` output when snapshotting and
+    restoring your monitor layout.
 
 ## Sunshine config file locations
 
-- `~/.config/sunshine/sunshine.conf` — main config, `output_name` is what
-  these scripts rewrite on start/stop.
-- `~/.config/sunshine/apps.json` — application list. Editing this directly
-  is faster than the web UI when adding several similar entries (e.g. one
-  per-client app tile with a different scale argument, see Setup step 4
-  below). Top-level `"env"` key here is global to all apps — there's no
-  per-app equivalent.
+These are the two Sunshine config files this project reads or writes:
+
+| File | Purpose |
+| --- | --- |
+| `~/.config/sunshine/sunshine.conf` | Main config. `output_name` is what these scripts rewrite on start/stop. |
+| `~/.config/sunshine/apps.json` | Application list. Editing this directly is faster than the web UI when adding several similar entries — e.g. one per-client app tile with a different scale argument (see [Setup step 4](#setup)). Its top-level `"env"` key is global to all apps; there's no per-app equivalent. |
 
 ## Setup
 
-1. Sunshine web UI (`https://your-ip:47990`) → Configuration → Advanced →
-   Force Capture Method → `kwin`.
-2. Install scripts:
+A quick primer if you haven't used Sunshine's "Applications" feature before:
+each Application is a tile that shows up in Moonlight, and it can define up
+to three commands — a **prep command** that runs *before* the stream
+starts, an **undo command** that runs *after* the stream ends, and the
+**command** that's actually launched (a game, Steam, a desktop session,
+etc.). This project hooks into the prep/undo commands to create and tear
+down the virtual display; you still choose whatever `Command` you want.
+
+1. **Set Sunshine's capture method to `kwin`.** By default Sunshine
+   auto-detects how to grab your screen, and on KDE Wayland that
+   auto-detected method won't capture the virtual display these scripts
+   create — you have to force it to use KDE's own `kwin` capture backend
+   instead.
+
+   - Open Sunshine's web UI in a browser: `https://your-ip:47990` (replace
+     `your-ip` with the IP or hostname of the machine running Sunshine; if
+     you're on the same machine, `https://localhost:47990` works too).
+   - Log in if prompted, then go to the **Configuration** tab.
+   - Click into the **Advanced** sub-tab.
+   - Find **Force Capture Method** and set it to **`kwin`**.
+   - Scroll down and click **Save**, then restart Sunshine so the setting
+     takes effect (restart the systemd service if you've installed it —
+     see step 5 — otherwise just relaunch the `sunshine` process).
+
+2. **Install the scripts to `~/.local/bin`.** That directory is
+   user-owned (no `sudo` needed) and already on `PATH` on most desktop
+   Linux setups, including CachyOS, so once copied the scripts can be
+   referenced directly by path from Sunshine's config, as shown in step 3.
+
    ```
    cp scripts/sunshine-start-vmon.sh scripts/sunshine-stop-vmon.sh ~/.local/bin/
    chmod +x ~/.local/bin/sunshine-start-vmon.sh ~/.local/bin/sunshine-stop-vmon.sh
    ```
-3. Sunshine web UI → Applications → Add new app:
-   - Prep command (Do): `$HOME/.local/bin/sunshine-start-vmon.sh` (run
-     `echo $HOME` if you need the literal path — Sunshine's UI field doesn't
-     expand `~` or env vars itself)
-   - Undo command: `$HOME/.local/bin/sunshine-stop-vmon.sh`
-   - Command: whatever you want to launch (e.g. `setsid steam steam://open/bigpicture`)
-4. (Optional — per-client DPI) Sunshine doesn't tell prep-cmd scripts which
-   client connected, only the resolution it requested. Note: `apps.json`'s
-   `"env"` key is global-only (applies to every app, sibling of `"apps"` in
-   the file) — there's no per-app `env` override, which is why it's not in
-   the web UI. Pass scale as a CLI argument in the `do` command instead, one
-   app tile per device — this works from the web UI's normal Prep command
-   field, no direct JSON editing needed:
-   - Prep command (Do): `$HOME/.local/bin/sunshine-start-vmon.sh 1.5`
-   - Undo command: `$HOME/.local/bin/sunshine-stop-vmon.sh` (unchanged, no
-     arg needed — it restores from the pre-session snapshot, not scale)
 
-   Duplicate the app per device (`Desktop (MacBook)`, `Desktop (iPad)`,
-   `Desktop (TV)`, ...) with the scale factor you want as the argument. Pick
-   the matching tile in Moonlight per client — it remembers your last pick
-   per host. Omit the argument to fall back to scale `1`.
-5. (Recommended — CachyOS's `sunshine` pacman package ships no systemd unit
-   at all) Install the user service, which also wires in the stop script as
-   `ExecStopPost` for crash safety — see `systemd/sunshine.service`. Its
-   paths use systemd's `%h` specifier so it works for any user without
-   editing.
+   The `chmod +x` is required — without the executable bit set, Linux will
+   refuse to run the scripts and Sunshine's prep/undo commands will fail.
 
-   User unit search paths, most specific wins (see `systemd.unit(5)`):
-   - `~/.config/systemd/user/` — per-user, this repo's install target
-   - `/etc/systemd/user/` — system-wide user-unit override
-   - `/usr/lib/systemd/user/` — system-wide user-unit default (package-installed)
+3. **Create an Application for Sunshine to launch:**
+
+   - In the web UI, go to the **Applications** tab and add a new app.
+   - Fill in these fields:
+
+     | Field | Value |
+     | --- | --- |
+     | Prep command (Do) | `$HOME/.local/bin/sunshine-start-vmon.sh` |
+     | Undo command | `$HOME/.local/bin/sunshine-stop-vmon.sh` |
+     | Command | whatever you want to launch, e.g. `setsid steam steam://open/bigpicture` — or leave it blank to just land in a normal desktop session on the virtual display |
+
+   - Save the app.
+
+   > Sunshine's UI field doesn't expand `~` or environment variables other
+   > than the literal string `$HOME`, so use `$HOME` exactly as shown
+   > above. If you need the literal path for some other reason, run
+   > `echo $HOME` in a terminal.
+
+4. **(Optional) Per-client DPI scaling.** Skip this unless you stream to
+   multiple devices with different DPI needs (e.g. a laptop and a tablet)
+   and want each to get a different UI scale.
+
+   - Create one Application per device, following step 3, but append a
+     scale factor as an argument to the prep command:
+
+     | Field | Value |
+     | --- | --- |
+     | Prep command (Do) | `$HOME/.local/bin/sunshine-start-vmon.sh 1.5` |
+     | Undo command | `$HOME/.local/bin/sunshine-stop-vmon.sh` (same as before — no argument needed) |
+
+   - Name each tile after the device it's for (`Desktop (MacBook)`,
+     `Desktop (iPad)`, `Desktop (TV)`, ...) and set the scale factor you
+     want for that device.
+   - In Moonlight, pick the matching tile per client — it remembers your
+     last choice per host. Omit the argument entirely to use scale `1`.
+
+   **Why per-device tiles instead of a per-device setting?** Sunshine's
+   prep-command scripts only receive the resolution the client requested,
+   not which client connected, so there's no built-in way to detect the
+   device automatically. `apps.json`'s top-level `"env"` key could in
+   theory pass a variable through, but it's global to every Application (a
+   sibling of `"apps"` in the file, not a per-app override), so it can't
+   vary by device either. Passing the scale as a CLI argument on a
+   per-device Application tile is the workaround — no JSON editing
+   required, since the Prep command field is exposed normally in the web
+   UI.
+
+5. **(Recommended) Install the systemd user service.** CachyOS's `sunshine`
+   pacman package ships no systemd unit at all. Installing one means the
+   stop script still runs (via `ExecStopPost`) to restore your monitors even
+   if Sunshine crashes instead of exiting cleanly.
 
    ```
    mkdir -p ~/.config/systemd/user
@@ -72,96 +146,77 @@ u/TacticalFreak improvements).
    systemctl --user enable --now sunshine
    ```
 
+   The unit file goes in `~/.config/systemd/user/`, systemd's per-user unit
+   directory — matching the `cp` destination above. It uses systemd's `%h`
+   specifier for paths, so it works as-is for any user — no editing needed.
+
 ## How it works
 
-1. Moonlight connects → Sunshine sets `SUNSHINE_CLIENT_WIDTH`/`HEIGHT`/`FPS`.
-2. Start script spins up a virtual display at that exact resolution.
-3. All physical monitors disabled, virtual display made primary.
-4. Sunshine (`kwin` mode) captures the virtual display, streams at correct ratio.
-5. On disconnect, stop script kills the virtual display and restores physical monitors.
-
-## Hardening vs. the original guide
-
-The original scripts (see PDF) had a few sharp edges, fixed here:
-
-- **Lockout risk**: original disabled all physical monitors unconditionally,
-  even if `krfb-virtualmonitor` failed to start (port conflict, missing
-  binary, etc.) — guaranteed black screen with no display anywhere. Start
-  script now polls for the virtual output to actually appear before touching
-  any physical monitor, and aborts cleanly if it doesn't.
-- **`set -e` abort mid-teardown**: one failed `kscreen-doctor` call on a
-  single output used to kill the whole script, leaving monitors in a mixed
-  disabled/enabled state and `sunshine.conf` never updated. Per-output
-  failures are now logged and non-fatal.
-- **PID tracking**: `$!` only captures the immediate child, which breaks if
-  `krfb-virtualmonitor` is a wrapper around another binary — `kill` would
-  hit nothing and the real process leaks. Now launched under `setsid` and
-  killed as a process group.
-- **Double-invocation**: rapid double-connects used to spawn a second
-  `krfb-virtualmonitor` fighting over port 5905 and overwrite the pidfile,
-  leaking the first process. Start script now checks for an existing live
-  instance and reuses it.
-- **`/tmp` pidfile**: world-writable dir, symlink-race risk. Moved to
-  `$XDG_RUNTIME_DIR` (falls back to `/tmp` if unset).
-- **Hardcoded password**: static `sunshinepass` for every session, now a
-  random 16-char password generated per invocation. Still visible via `ps`
-  to local users — inherent to `krfb-virtualmonitor`'s CLI, not fixable
-  short of patching upstream.
-- **Fixed `sleep 3`**: replaced with polling `kscreen-doctor -o` for the
-  virtual output, up to ~10s, so it's neither flaky on a slow system nor
-  wasteful on a fast one.
-- Stop script now kills the virtual display *before* restoring physical
-  monitors (was the other way around), and excludes the virtual output name
-  from the enable loop.
-- **No output auto-detection**: original hardcoded `PHYSICAL_OUTPUT=DP-1`
-  and required manually editing it to match your actual output name (e.g.
-  `HDMI-A-1`). Start script now snapshots the full `kscreen-doctor --json`
-  output — per-monitor enabled state, position, mode, scale, rotation,
-  priority — before touching anything, and the stop script replays it. No
-  manual edit needed, and multi-monitor arrangement (not just which outputs
-  were on) is restored instead of just re-enabling everything and hoping the
-  layout comes back. Outputs that were intentionally disabled before
-  streaming stay disabled after, rather than being force-enabled.
-- **Unconditional `sunshine.conf` rewrite**: since the stop script also runs
-  via `ExecStopPost` on *every* service stop/restart (not just crashes), it
-  used to overwrite `output_name` even when no streaming session was ever
-  active. It now no-ops entirely if no snapshot/pidfile exists.
+1. **Moonlight connects.** Sunshine determines the resolution and frame
+   rate the client requested, and exposes them as the environment
+   variables `SUNSHINE_CLIENT_WIDTH`, `SUNSHINE_CLIENT_HEIGHT`, and
+   `SUNSHINE_CLIENT_FPS` before running the Prep command.
+2. **The start script creates the virtual display.** It reads those
+   variables and tells `krfb-virtualmonitor` to create a new display at
+   that exact resolution — this is what lets the stream match the client
+   instead of a fixed dummy-plug resolution.
+3. **Physical monitors are disabled and the virtual display goes
+   primary,** so KWin treats it as the main screen and your desktop
+   renders onto it at the client's resolution.
+4. **Sunshine captures and streams it.** Because Sunshine is set to the
+   `kwin` capture method ([Setup step 1](#setup)), it captures the virtual
+   display specifically, at the exact resolution created above — no
+   scaling or letterboxing.
+5. **On disconnect, the stop script cleans up:** it kills the virtual
+   display and restores your physical monitors to their pre-stream layout.
 
 ## Known issues / FAQ
 
-- `zkde_screencast_unstable_v1 not found in registry`: set
-  `KWIN_WAYLAND_NO_PERMISSION_CHECKS=1` in `/etc/environment.d/` or
-  `~/.config/environment.d/`.
-- If Sunshine crashes mid-session without the systemd service installed,
-  physical monitors stay disabled until you manually run the stop script.
-- The snapshot/restore logic's assumed `kscreen-doctor --json` field names
-  (`name`, `enabled`, `priority`, `pos.x`/`pos.y`, `scale`, `rotation`,
-  `currentModeId`, `modes[].id`/`.size.width`/`.size.height`/`.refreshRate`)
-  have been verified against a live single-monitor CachyOS system. If you're
-  on a different Plasma/kscreen version and restore silently skips a field,
-  run `kscreen-doctor --json | jq .` and compare, then adjust the `jq`
-  queries in `sunshine-stop-vmon.sh`.
+- **Sunshine crashes mid-session without the systemd service installed**
+  - What happens: physical monitors stay disabled until you manually run
+    the stop script.
+  - Why: without the systemd unit's `ExecStopPost` hook
+    ([Setup step 5](#setup)), nothing runs the stop script if Sunshine
+    itself dies unexpectedly.
+  - Fix: run `~/.local/bin/sunshine-stop-vmon.sh` by hand to restore your
+    monitors, and consider installing the systemd service to prevent this
+    going forward.
+
+- **Field names may differ across Plasma/kscreen versions**
+  - Context: the snapshot/restore logic's assumed `kscreen-doctor --json`
+    field names (`name`, `enabled`, `priority`, `pos.x`/`pos.y`, `scale`,
+    `rotation`, `currentModeId`,
+    `modes[].id`/`.size.width`/`.size.height`/`.refreshRate`) have only
+    been verified against a live single-monitor CachyOS system.
+  - If you're on a different version and restore silently skips a field:
+    run `kscreen-doctor --json | jq .`, compare the field names, and
+    adjust the `jq` queries in `sunshine-stop-vmon.sh` accordingly.
 
 ## Debugging a failed start
 
 Sunshine does **not** forward the prep-cmd script's stdout/stderr into its
 own log — a failure there just shows up as
-`[...sunshine-start-vmon.sh] exited with code [1]`, with no detail. Both
-scripts write their own logs, including `krfb-virtualmonitor`'s raw output
-from the start script, to:
+`[...sunshine-start-vmon.sh] exited with code [1]`, with no further
+detail. To make failures debuggable, both scripts write their own logs
+(including `krfb-virtualmonitor`'s raw output from the start script) to:
 
 ```
 $XDG_STATE_HOME/sunshine-vmon/start.log   # typically ~/.local/state/sunshine-vmon/start.log
 $XDG_STATE_HOME/sunshine-vmon/stop.log
 ```
 
-(Persistent, not `$XDG_RUNTIME_DIR` — that's tmpfs and gets wiped on
-logout/reboot, exactly when you'd want to inspect a crash. The pidfile and
-monitor-layout snapshot are genuinely ephemeral session state and do stay in
-`$XDG_RUNTIME_DIR`.)
+These are written to `$XDG_STATE_HOME` (persistent storage) rather than
+`$XDG_RUNTIME_DIR`, since the latter is tmpfs and gets wiped on
+logout/reboot — exactly when you'd want to inspect a crash. (The pidfile
+and monitor-layout snapshot are genuinely ephemeral session state, so
+those do stay in `$XDG_RUNTIME_DIR`.)
 
-Check `start.log` first any time an app using these scripts fails to launch
-— it's overwritten fresh on every invocation. Exit code 1 specifically means
-the virtual display never registered with KWin within the ~10s poll window;
-the logfile will show whether `krfb-virtualmonitor` errored out (missing
-binary, port 5905 already in use, permission/portal failure) or just hung.
+When something fails:
+
+1. Check `start.log` first — it's overwritten fresh on every invocation,
+   so it always reflects the most recent attempt.
+2. If Sunshine reported exit code 1, that specifically means the virtual
+   display never registered with KWin within the ~10s poll window.
+3. The logfile will show why: a missing `krfb-virtualmonitor` binary,
+   port 5905 already in use, a permission/portal failure, or the process
+   just hanging.
