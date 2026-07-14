@@ -1,0 +1,32 @@
+# Locks the session immediately whenever a graphical session starts,
+# including one created by your login manager's autologin — so autologin
+# never leaves an unlocked desktop sitting on the physical console.
+#
+# Ordered after kwin_wayland/ksmserver specifically, NOT graphical-session.target:
+# that target also waits on plasma-powerdevil.service, which can take several
+# seconds to start (7s+ measured on one system) despite being irrelevant to
+# whether the desktop can host a lock screen. KWin and ksmserver are what
+# actually need to be up for the lock to take effect immediately, so ordering
+# on them directly avoids inheriting graphical-session.target's slowest
+# dependency. Still pulled in by / tied to graphical-session.target via
+# PartOf/WantedBy so it starts and stops with the rest of the session.
+#
+# Install:
+#   cp systemd/lock-on-start.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable lock-on-start.service
+#
+# No --now: enabling it doesn't lock your current session immediately,
+# only on the next graphical-session.target start.
+
+[Unit]
+Description=Lock session immediately after graphical login
+After=plasma-kwin_wayland.service plasma-ksmserver.service
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/loginctl lock-session
+
+[Install]
+WantedBy=graphical-session.target

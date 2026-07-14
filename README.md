@@ -150,6 +150,45 @@ down the virtual display; you still choose whatever `Command` you want.
    directory — matching the `cp` destination above. It uses systemd's `%h`
    specifier for paths, so it works as-is for any user — no editing needed.
 
+6. **(Optional) Autologin with immediate lock.** Since `sunshine.service`
+   only starts once a graphical session exists ([step 5](#setup)), a fresh
+   boot needs someone to physically log in before Sunshine comes up —
+   defeating the point of a headless/remote setup. Autologin fixes that, but
+   an autologin session normally comes up fully unlocked on the physical
+   console; the second piece below locks it immediately so that isn't a
+   problem.
+
+   - **Enable autologin** for your user through your login manager's own
+     setting — e.g. CachyOS's Settings app → Login Screen, or your login
+     manager's autologin option directly (SDDM's `[Autologin]` section in
+     `/etc/sddm.conf.d/`, or Plasma's own login manager settings on distros
+     that use it instead of SDDM). This part is distro/login-manager
+     specific, so it's not scripted here — use whatever your system
+     provides.
+   - **Install the lock-on-start unit** so the session locks the instant the
+     graphical session comes up:
+     ```
+     cp systemd/lock-on-start.service ~/.config/systemd/user/
+     systemctl --user daemon-reload
+     systemctl --user enable lock-on-start.service
+     ```
+     Like `sunshine.service`, this is tied to `graphical-session.target`
+     (via `PartOf`/`WantedBy`), so it fires on every graphical login —
+     autologin at boot or a normal manual login alike. Its `After=` is
+     deliberately pinned to `plasma-kwin_wayland.service` and
+     `plasma-ksmserver.service` specifically, **not**
+     `graphical-session.target` itself — on one test system,
+     `plasma-powerdevil.service` (also pulled in by that target) took 7+
+     seconds to start, which delayed the target and left the desktop
+     visible and unlocked the whole time. Ordering on KWin/ksmserver
+     directly means the lock fires within about a second of them being up,
+     regardless of how long slower, lock-irrelevant units elsewhere in the
+     session take to start. Confirmed on Plasma 6.7.2/CachyOS: the session
+     goes straight to the lock screen on boot with no visible unlocked
+     desktop, and Sunshine's virtual-monitor capture keeps streaming
+     normally while locked — connecting via Moonlight shows the real lock
+     screen (and the desktop after unlocking), not a frozen frame.
+
 ## How it works
 
 1. **Moonlight connects.** Sunshine determines the resolution and frame
