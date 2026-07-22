@@ -1,15 +1,15 @@
 # Sunshine + KDE Wayland virtual display (CachyOS)
 
-Stream the correct resolution and aspect ratio to any Moonlight client — no
-dummy HDMI plug required.
+Stream the correct resolution, aspect ratio, and frame rate to any Moonlight
+client — no dummy HDMI plug required.
 
 Normally, streaming from a headless or docked machine means either plugging
 in a dummy HDMI adapter (a fixed resolution that likely won't match your
 client) or fighting with software-emulated displays. This project instead
-creates a `krfb-virtualmonitor` display sized exactly to match whatever
-client connects, and has Sunshine capture that virtual display via its
-`kwin` capture mode — so the stream always matches the client's native
-resolution and aspect ratio.
+creates a `krfb-virtualmonitor` display sized and clocked exactly to match
+whatever client connects, and has Sunshine capture that virtual display via
+its `kwin` capture mode — so the stream always matches the client's native
+resolution, aspect ratio, and frame rate.
 
 ## Contents
 
@@ -198,10 +198,13 @@ down the virtual display; you still choose whatever `Command` you want.
 2. **The start script creates the virtual display.** It reads those
    variables and tells `krfb-virtualmonitor` to create a new display at
    that exact resolution — this is what lets the stream match the client
-   instead of a fixed dummy-plug resolution.
+   instead of a fixed dummy-plug resolution. It also registers a custom
+   `kscreen-doctor` mode at the client's requested frame rate and switches
+   the virtual display to it, so the stream isn't locked to whatever
+   default refresh rate `krfb-virtualmonitor` would otherwise pick.
 3. **Physical monitors are disabled and the virtual display goes
    primary,** so KWin treats it as the main screen and your desktop
-   renders onto it at the client's resolution.
+   renders onto it at the client's resolution and frame rate.
 4. **Sunshine captures and streams it.** Because Sunshine is set to the
    `kwin` capture method ([Setup step 1](#setup)), it captures the virtual
    display specifically, at the exact resolution created above — no
@@ -220,6 +223,17 @@ down the virtual display; you still choose whatever `Command` you want.
   - Fix: run `~/.local/bin/sunshine-stop-vmon.sh` by hand to restore your
     monitors, and consider installing the systemd service to prevent this
     going forward.
+
+- **Why does the log show a random password being generated?**
+  - Context: `krfb-virtualmonitor` requires a VNC password on its command
+    line, so the start script generates a fresh random one on every
+    invocation (`start.log` will show it, and it's visible to local users
+    via `ps` for the lifetime of the process — inherent to how
+    `krfb-virtualmonitor` takes it as a CLI arg).
+  - Why it's fine here: Sunshine captures the virtual display through
+    KWin's `kwin` capture mode, not by connecting to `krfb-virtualmonitor`'s
+    VNC server, so nothing actually authenticates with this password in
+    normal use. It exists only because the binary requires one to launch.
 
 - **Field names may differ across Plasma/kscreen versions**
   - Context: the snapshot/restore logic's assumed `kscreen-doctor --json`
