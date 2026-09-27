@@ -278,11 +278,12 @@ down the virtual display; you still choose whatever `Command` you want.
   - Context: the snapshot/restore logic's assumed `kscreen-doctor --json`
     field names (`name`, `enabled`, `priority`, `pos.x`/`pos.y`, `scale`,
     `rotation`, `currentModeId`,
-    `modes[].id`/`.size.width`/`.size.height`/`.refreshRate`) have only
-    been verified against a live single-monitor CachyOS system.
-  - If you're on a different version and restore silently skips a field:
-    run `kscreen-doctor --json | jq .`, compare the field names, and
-    adjust the `jq` queries in `sunshine-stop-vmon.sh` accordingly.
+    `modes[].id`/`.size.width`/`.size.height`/`.refreshRate`)
+
+- **Using multiple monitors**
+  - This setup has been tested on a multi-monitor CachyOS system. To apply
+    the correct screen, configure **Display Id** in Sunshine's
+    **Configuration** on the **Audio/Video** sub-tab.
 
 ## Debugging a failed start
 
