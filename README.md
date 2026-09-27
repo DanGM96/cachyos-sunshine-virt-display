@@ -58,7 +58,7 @@ starts, an **undo command** that runs *after* the stream ends, and the
 etc.). This project hooks into the prep/undo commands to create and tear
 down the virtual display; you still choose whatever `Command` you want.
 
-1. **Set Sunshine's capture method to `kwin`.** By default Sunshine
+1. **Configure Sunshine's capture method and global command preparations.** By default Sunshine
    auto-detects how to grab your screen, and on KDE Wayland that
    auto-detected method won't capture the virtual display these scripts
    create — you have to force it to use KDE's own `kwin` capture backend
@@ -68,10 +68,34 @@ down the virtual display; you still choose whatever `Command` you want.
      `your-ip` with the IP or hostname of the machine running Sunshine; if
      you're on the same machine, `https://localhost:47990` works too).
    - Log in if prompted, then go to the **Configuration** tab.
-   - Click into the **Advanced** sub-tab.
-   - Find **Force Capture Method** and set it to **`kwin`**.
-   - Scroll down and click **Save**, then restart Sunshine so the setting
-     takes effect.
+   - In the **General** sub-tab, find **Command Preparations**, click
+     **+ Add**, and enter the following values:
+     | Field | Value |
+     | --- | --- |
+     | Do command | `sunshine-start-vmon.sh` |
+     | Undo command | `sunshine-stop-vmon.sh` |
+
+     The scripts are available by name after step 2 installs `~/.local/bin` on your PATH.
+
+   - In the **Advanced** sub-tab, find **Force a Specific Capture Method**
+     and set it to **KWin Screencast**. This forces Sunshine to use KDE's
+     capture backend, which can capture the virtual display created by the
+     scripts.
+   - Click **Save**, then restart Sunshine so the settings take effect.
+
+   If you want to configure prep and undo commands per application in step 3,
+   or use per-client scaling in step 4, skip both the **Command Preparations**
+   entry above and the `global_prep_cmd` configuration below.
+
+   You can edit `~/.config/sunshine/sunshine.conf` directly instead. Add:
+
+   ```ini
+   capture = kwin
+   global_prep_cmd = [{"do":"sunshine-start-vmon.sh","undo":"sunshine-stop-vmon.sh"}]
+   ```
+
+   Use either the web UI or the configuration file for the global command
+   preparations, not both.
 
 2. **Install the scripts to `~/.local/bin`.** That directory is
    user-owned (no `sudo` needed) and already on `PATH` on most desktop
@@ -86,35 +110,42 @@ down the virtual display; you still choose whatever `Command` you want.
    The `chmod +x` is required — without the executable bit set, Linux will
    refuse to run the scripts and Sunshine's prep/undo commands will fail.
 
-3. **Create an Application for Sunshine to launch:**
+3. **(Optional) Create an Application for Sunshine to launch:**
 
    - In the web UI, go to the **Applications** tab and add a new app.
    - Fill in these fields:
 
      | Field | Value |
      | --- | --- |
-     | Prep command (Do) | `$HOME/.local/bin/sunshine-start-vmon.sh` |
-     | Undo command | `$HOME/.local/bin/sunshine-stop-vmon.sh` |
+     | Do command | `sunshine-start-vmon.sh` |
+     | Undo command | `sunshine-stop-vmon.sh` |
      | Command | whatever you want to launch, e.g. `setsid steam steam://open/bigpicture` — or leave it blank to just land in a normal desktop session on the virtual display |
 
    - Save the app.
 
-   > Sunshine's UI field doesn't expand `~` or environment variables other
-   > than the literal string `$HOME`, so use `$HOME` exactly as shown
+   The prep and undo commands are optional per-application alternatives to the
+   global command preparations in step 1. Use one approach or the other.
+
+   > Sunshine's UI field doesn't expand `~` or environment variables,
+   > including `$HOME`, so use the scripts from step 2 exactly as shown
    > above. If you need the literal path for some other reason, run
-   > `echo $HOME` in a terminal.
+   > `realpath sunshine-start-vmon.sh sunshine-stop-vmon.sh` in a terminal.
 
 4. **(Optional) Per-client DPI scaling.** Skip this unless you stream to
    multiple devices with different DPI needs (e.g. a laptop and a tablet)
    and want each to get a different UI scale.
+
+   Per-client scaling uses per-application commands instead of the global
+   command preparations from step 1. Remove the global preparations before
+   configuring these application-specific commands.
 
    - Create one Application per device, following step 3, but append a
      scale factor as an argument to the prep command:
 
      | Field | Value |
      | --- | --- |
-     | Prep command (Do) | `$HOME/.local/bin/sunshine-start-vmon.sh 1.5` |
-     | Undo command | `$HOME/.local/bin/sunshine-stop-vmon.sh` (same as before — no argument needed) |
+     | Do command | `sunshine-start-vmon.sh 1.5` |
+     | Undo command | `sunshine-stop-vmon.sh` (same as before — no argument needed) |
 
    - Name each tile after the device it's for (`Desktop (MacBook)`,
      `Desktop (iPad)`, `Desktop (TV)`, ...) and set the scale factor you
