@@ -71,8 +71,7 @@ down the virtual display; you still choose whatever `Command` you want.
    - Click into the **Advanced** sub-tab.
    - Find **Force Capture Method** and set it to **`kwin`**.
    - Scroll down and click **Save**, then restart Sunshine so the setting
-     takes effect (restart the systemd service if you've installed it —
-     see step 5 — otherwise just relaunch the `sunshine` process).
+     takes effect.
 
 2. **Install the scripts to `~/.local/bin`.** That directory is
    user-owned (no `sudo` needed) and already on `PATH` on most desktop
@@ -134,29 +133,39 @@ down the virtual display; you still choose whatever `Command` you want.
    required, since the Prep command field is exposed normally in the web
    UI.
 
-5. **(Recommended) Install the systemd user service.** CachyOS's `sunshine`
-   pacman package ships no systemd unit at all. Installing one means the
-   stop script still runs (via `ExecStopPost`) to restore your monitors even
-   if Sunshine crashes instead of exiting cleanly.
+5. **(Recommended) Add the monitor cleanup to Sunshine's user service.**
+   Add the stop script as an `ExecStopPost` hook so your monitors are restored
+   if Sunshine exits unexpectedly.
 
    ```
-   mkdir -p ~/.config/systemd/user
-   cp systemd/sunshine.service ~/.config/systemd/user/
+   systemctl --user edit app-dev.lizardbyte.app.Sunshine.service
+   ```
+
+   Add:
+
+   ```ini
+   [Service]
+   ExecStopPost=%h/.local/bin/sunshine-stop-vmon.sh
+   ```
+
+   Then reload systemd:
+
+   ```
    systemctl --user daemon-reload
-   systemctl --user enable --now sunshine
    ```
 
-   The unit file goes in `~/.config/systemd/user/`, systemd's per-user unit
-   directory — matching the `cp` destination above. It uses systemd's `%h`
-   specifier for paths, so it works as-is for any user — no editing needed.
+   The `%h` specifier expands to your home directory.
 
-6. **(Optional) Autologin with immediate lock.** Since `sunshine.service`
-   only starts once a graphical session exists ([step 5](#setup)), a fresh
-   boot needs someone to physically log in before Sunshine comes up —
-   defeating the point of a headless/remote setup. Autologin fixes that, but
-   an autologin session normally comes up fully unlocked on the physical
-   console; the second piece below locks it immediately so that isn't a
-   problem.
+6. **(Optional) Start Sunshine at login and lock an autologin session.**
+   Enable Sunshine with the graphical session so it starts after you log in.
+   For a headless setup, combine this with autologin; the lock-on-start unit
+   then locks the session immediately instead of leaving the physical console
+   unlocked.
+
+   - **Enable Sunshine at login** so it starts with the graphical session:
+     ```
+     systemctl --user enable app-dev.lizardbyte.app.Sunshine.service
+     ```
 
    - **Enable autologin** for your user through your login manager's own
      setting — e.g. CachyOS's Settings app → Login Screen, or your login
@@ -172,8 +181,8 @@ down the virtual display; you still choose whatever `Command` you want.
      systemctl --user daemon-reload
      systemctl --user enable lock-on-start.service
      ```
-     Like `sunshine.service`, this is tied to `graphical-session.target`
-     (via `PartOf`/`WantedBy`), so it fires on every graphical login —
+     This is tied to `graphical-session.target` (via `PartOf`/`WantedBy`), so
+     it fires on every graphical login —
      autologin at boot or a normal manual login alike. Its `After=` is
      deliberately pinned to `plasma-kwin_wayland.service` and
      `plasma-ksmserver.service` specifically, **not**
@@ -214,15 +223,14 @@ down the virtual display; you still choose whatever `Command` you want.
 
 ## Known issues / FAQ
 
-- **Sunshine crashes mid-session without the systemd service installed**
+- **Sunshine crashes mid-session before the service cleanup hook is installed**
   - What happens: physical monitors stay disabled until you manually run
     the stop script.
-  - Why: without the systemd unit's `ExecStopPost` hook
+  - Why: without the service's `ExecStopPost` hook
     ([Setup step 5](#setup)), nothing runs the stop script if Sunshine
     itself dies unexpectedly.
   - Fix: run `~/.local/bin/sunshine-stop-vmon.sh` by hand to restore your
-    monitors, and consider installing the systemd service to prevent this
-    going forward.
+    monitors, then add the service cleanup hook in Setup step 5.
 
 - **Why does the log show a random password being generated?**
   - Context: `krfb-virtualmonitor` requires a VNC password on its command
